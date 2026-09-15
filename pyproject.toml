@@ -166,6 +166,7 @@ mkdocstrings-python = "*"
 griffe = "*"
 griffe-pydantic = "*"
 tabulate = "*"
+mike = { git = "https://github.com/squidfunk/mike.git" }
 
 # --- GPU features -----------------------------------------------------
 [tool.pixi.feature.gpu.dependencies]

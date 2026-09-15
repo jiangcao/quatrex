@@ -26,6 +26,8 @@ linting:
 - [`black`](https://black.readthedocs.io/en/stable/) for code formatting
 - [`isort`](https://isort.readthedocs.io/en/latest/) for sorting imports
   according to [PEP 8](https://peps.python.org/pep-0008/) guidelines
+- `ipykernel` / `ipympl` to run Jupyter notebooks with matplotlib
+  support enabled.
 
 Additionally, [`pre-commit`](https://pre-commit.com/) is used to manage
 pre-commit hooks for linting and formatting code. Install the pre-commit
@@ -53,6 +55,8 @@ Python codebases.
   all Python code. We are using
   [`black`](https://black.readthedocs.io/en/stable/) for automatic code
   formatting and [`ruff`](https://docs.astral.sh/ruff/) for linting.
+  Note that docstrings are not formatted by `black`, so please ensure
+  that they are properly formatted and readable.
 - Write clear and concise docstrings for all functions and classes in
   accordance with the [NumPy documentation
   style](https://numpydoc.readthedocs.io/en/latest/format.html). You can
@@ -104,6 +108,16 @@ the automated testing and linting. We run linting and formatting with
 GPUs, we only run the CPU tests on GitHub. These runners have only 4 CPU
 cores, so we run the distributed tests with just 3 ranks.
 
+On pull requests, the GitHub actions are triggered automatically. The
+results of the tests and linting are displayed in the pull request
+making use of the
+[`python-coverage-comment-action`](https://github.com/py-cov-action/python-coverage-comment-action/).
+
+!!! note "Coverage report for CPU tests only"
+    Note that the coverage report is only generated for the CPU tests,
+    as the coverage report for the GPU tests is not generated directly
+    on GitHub.
+
 We also run the full test suite on Alps' GPUs. See the CSCS [CI/CD
 documentation](https://docs.cscs.ch/services/cicd/) for reference. If
 you have the necessary permissions, you can trigger the Alps pipeline
@@ -120,8 +134,12 @@ reference documentation](api) from the docstrings in the code. The
 parameter reference pages](user_guide/parameters) from the `pydantic`
 model definitions.
 
-All documentation is built and deployed automatically on GitHub pages
-whenever changes are pushed to the default branch.
+To track different versions of `quatrex`'s documentation, we use
+[`mike`](https://zensical.org/docs/compatibility/mkdocs/mike/). Every
+merge into `dev` and every tagged release on `main` triggers a new
+documentation build and deployment to the `gh-pages` branch. The
+documentation is automatically made available at
+[https://quatrex.github.io/quatrex/](https://quatrex.github.io/quatrex/).
 
 To build and view the documentation locally, you can use the `pixi`
 task:
@@ -133,3 +151,33 @@ pixi run docs serve
 For more information on writing documentation, see, e.g., the [section
 on authoring](https://zensical.org/docs/authoring/markdown/) in the
 Zensical documentation.
+
+## Publishing a `quatrex` release
+
+!!! note "Semantic versioning"
+    We follow [semantic versioning](https://semver.org/) for `quatrex`
+    releases. The version number is in the format `X.Y.Z`, where `X` is
+    the major version, `Y` is the minor version, and `Z` is the patch
+    version.
+
+!!! danger "Early development"
+    We are currently in the `0.Y.Z` development phase, so we do not
+    guarantee backward compatibility for `quatrex` releases. (See
+    https://semver.org/#spec-item-4)
+
+The following steps are a guideline for publishing a new release of
+`quatrex`:
+
+1. Make sure that all tests pass on the `dev` branch and that the code
+   is properly linted and formatted.
+2. Update the version number in `src/quatrex/__about__.py`.
+3. Open a pull request to merge the changes into the `main` branch. The
+   title of the pull request should be `Release vX.Y.Z`, where `X.Y.Z`
+   is the new version number.
+4. After all tests pass and the pull request is approved, merge the pull
+   request into the `main` branch. Do not squash the commits, as we want
+   to keep the commit history for the release.
+5. Tag the commit with the new version number, e.g., `vX.Y.Z` and create
+   a release on GitHub. The release notes should include a summary of
+   the changes in the new version.
+
