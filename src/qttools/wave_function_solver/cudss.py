@@ -119,11 +119,11 @@ class cuDSS(WFSolver):
                 "Both 'comm' and 'local_rows' must be provided together or not at all."
             )
 
-        try:
+        if local_rows is not None:
             start, stop = local_rows
             # NOTE: cuDSS uses inclusive end row
             self.local_rows = (int(start), int(stop) - 1)
-        except TypeError:
+        else:
             self.local_rows = None
 
         if comm is not None:
