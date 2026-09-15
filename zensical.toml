@@ -239,6 +239,8 @@ nav = [
     ] },
 ]
 
+    [project.extra.version]
+    provider = "mike"
 
     [project.theme]
     variant = "modern"

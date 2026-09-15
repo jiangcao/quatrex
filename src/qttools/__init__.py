@@ -7,8 +7,6 @@ from typing import Any
 from mpi4py.MPI import COMM_WORLD as global_comm
 from numpy.typing import ArrayLike
 
-from qttools.__about__ import __version__
-
 
 def strtobool(s: str | None, default: bool | None = None) -> bool:
     """Convert a string to a boolean."""
@@ -77,4 +75,4 @@ else:
 # Some type aliases for the array module.
 type NDArray[ScalarType: xp.generic] = xp.ndarray[tuple[Any, ...], xp.dtype[ScalarType]]
 
-__all__ = ["__version__", "xp", "sparse", "NDArray", "ArrayLike"]
+__all__ = ["xp", "sparse", "NDArray", "ArrayLike"]
