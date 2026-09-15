@@ -1,0 +1,265 @@
+# Copyright (c) 2024-2026 ETH Zurich and the authors of the qttools package.
+
+"""Includes our CUDA coo datastructure kernels."""
+
+import os
+
+import cupy as cp
+import numpy as np
+
+from qttools import QTX_USE_CUPY_JIT, NDArray, strtobool
+from qttools.kernels.datastructure.cupy import THREADS_PER_BLOCK
+
+if QTX_USE_CUPY_JIT:
+    from qttools.kernels.datastructure.cupy import _cupy_jit as cupy_backend
+else:
+    from qttools.kernels.datastructure.cupy import _cupy_rawkernel as cupy_backend
+
+
+# NOTE: CUDA kernels are not profiled, as the jit-compiled kernels
+# cannot find the correct name of the function to profile.
+QTX_USE_DENSIFY_BLOCK = strtobool(os.getenv("QTX_USE_DENSIFY_BLOCK"), False)
+
+
+def compute_block_slice(
+    rows: NDArray, cols: NDArray, block_offsets: NDArray, row: int, col: int
+) -> slice:
+    """Computes the slice of the block in the data.
+
+    Parameters
+    ----------
+    rows : NDArray
+        The row indices of the matrix.
+    cols : NDArray
+        The column indices of the matrix.
+    block_offsets : NDArray
+        The offsets of the blocks.
+    row : int
+        The block row to compute the slice for.
+    col : int
+        The block column to compute the slice for.
+
+    Returns
+    -------
+    start : int
+        The start index of the block.
+    stop : int
+        The stop index of the block.
+
+    """
+    mask = cp.zeros_like(rows, dtype=cp.bool_)
+
+    dtype = rows.dtype.type
+    if block_offsets.dtype.type != dtype or cols.dtype.type != dtype:
+        raise TypeError(
+            f"All input arrays must have the same dtype, but got {rows.dtype}, {cols.dtype}, {block_offsets.dtype}."
+        )
+
+    row_start, row_stop = dtype(block_offsets[row]), dtype(block_offsets[row + 1])
+    col_start, col_stop = dtype(block_offsets[col]), dtype(block_offsets[col + 1])
+
+    blocks_per_grid = (rows.shape[0] + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
+    cupy_backend._compute_coo_block_mask(
+        (blocks_per_grid,),
+        (THREADS_PER_BLOCK,),
+        (
+            rows,
+            cols,
+            row_start,
+            row_stop,
+            col_start,
+            col_stop,
+            mask,
+            dtype(rows.shape[0]),
+        ),
+    )
+    if cp.sum(mask) == 0:
+        # No data in this block, return an empty slice.
+        return None, None
+
+    # NOTE: The data is sorted by block-row and -column, so
+    # we can safely assume that the block is contiguous.
+    inds = cp.nonzero(mask)[0]
+
+    # NOTE: this copies back to the host
+    return int(inds[0]), int(inds[-1] + 1)
+
+
+def densify_block(
+    block: NDArray,
+    rows: NDArray,
+    cols: NDArray,
+    data: NDArray,
+    block_slice: slice,
+    row_offset: int,
+    col_offset: int,
+    use_kernel: bool = QTX_USE_DENSIFY_BLOCK,
+):
+    """Fills the dense block with the given data.
+
+    Note
+    ----
+    This is not a raw kernel, as there seems to be no performance gain
+    for this operation on the GPU.
+
+    Parameters
+    ----------
+    rows : NDArray
+        The rows at which to fill the block.
+    cols : NDArray
+        The columns at which to fill the block.
+    data : NDArray
+        The data to fill the block with.
+    block : NDArray
+        Preallocated dense block. Should be filled with zeros.
+    block_slice : slice
+        The slice of the block to fill.
+    row_offset : int
+        The row offset of the block.
+    col_offset : int
+        The column offset of the block
+
+    """
+
+    dtype = rows.dtype.type
+    if cols.dtype.type != dtype:
+        raise TypeError(
+            f"All input arrays must have the same dtype, but got {rows.dtype}, {cols.dtype}."
+        )
+
+    # TODO: Needs profilig to see if this is faster than the raw kernel.
+    if not use_kernel:
+        block[..., rows[block_slice] - row_offset, cols[block_slice] - col_offset] = (
+            data[..., block_slice]
+        )
+
+    else:
+        stack_size = data.size // data.shape[-1]
+        stack_stride = data.shape[-1]
+        block_start = block_slice.start or 0
+        nnz_per_block = block_slice.stop - block_start
+        num_blocks = (
+            stack_size * nnz_per_block + THREADS_PER_BLOCK - 1
+        ) // THREADS_PER_BLOCK
+        cupy_backend._densify_block(
+            (num_blocks,),
+            (THREADS_PER_BLOCK,),
+            (
+                block.reshape(-1),
+                rows,
+                cols,
+                data.reshape(-1),
+                dtype(stack_size),
+                dtype(stack_stride),
+                dtype(nnz_per_block),
+                dtype(block.shape[-2]),
+                dtype(block.shape[-1]),
+                dtype(block_start),
+                dtype(row_offset),
+                dtype(col_offset),
+            ),
+        )
+
+
+def sparsify_block(block: NDArray, rows: NDArray, cols: NDArray, data: NDArray):
+    """Fills the data with the given dense block.
+
+    Note
+    ----
+    This is not a raw kernel, as there seems to be no performance gain
+    for this operation on the GPU.
+
+    Parameters
+    ----------
+    block : NDArray
+        The dense block to sparsify.
+    rows : NDArray
+        The rows at which to fill the block.
+    cols : NDArray
+        The columns at which to fill the block.
+    data : NDArray
+        The data to be filled with the block.
+
+    """
+    # TODO: Test whether a custom kernel could be faster here.
+    data[:] = block[..., rows, cols]
+
+
+def compute_block_sort_index(
+    coo_rows: NDArray, coo_cols: NDArray, block_sizes: NDArray
+) -> NDArray:
+    """Computes the block-sorting index for a sparse matrix.
+
+    Note
+    ----
+    Due to the Python for loop around the kernel, this method will
+    perform best for larger block sizes (>500).
+
+    Parameters
+    ----------
+    coo_rows : NDArray
+        The row indices of the matrix in coordinate format.
+    coo_cols : NDArray
+        The column indices of the matrix in coordinate format.
+    block_sizes : NDArray
+        The block sizes of the block-sparse matrix we want to construct.
+
+    Returns
+    -------
+    sort_index : NDArray
+        The indexing that sorts the data by block-row and -column.
+
+    """
+    dtype = coo_rows.dtype.type
+    if coo_cols.dtype.type != dtype:
+        raise TypeError(
+            f"All input arrays must have the same dtype, but got {coo_rows.dtype}, {coo_cols.dtype}."
+        )
+
+    num_blocks = block_sizes.shape[0]
+    block_offsets = np.hstack((np.array([0]), np.cumsum(block_sizes)), dtype=dtype)
+
+    sort_index = cp.zeros_like(coo_cols)
+    mask = cp.zeros_like(coo_cols, dtype=cp.bool_)
+
+    blocks_per_grid = (len(coo_cols) + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
+    offset = 0
+
+    for i, j in cp.ndindex(num_blocks, num_blocks):
+        cupy_backend._compute_coo_block_mask(
+            (blocks_per_grid,),
+            (THREADS_PER_BLOCK,),
+            (
+                coo_rows,
+                coo_cols,
+                dtype(block_offsets[i]),
+                dtype(block_offsets[i + 1]),
+                dtype(block_offsets[j]),
+                dtype(block_offsets[j + 1]),
+                mask,
+                dtype(len(coo_cols)),
+            ),
+        )
+
+        # NOTE: Fix for AMD cupy where cub was not used
+        if cp.cuda.runtime.is_hip:
+            if QTX_USE_CUPY_JIT:
+                # TODO: investigate this again
+                # this was a previous fix for AMD on Frontier
+                # remove the custom reduction if not needed anymore
+                # CUPY_ACCELERATORS still seems to be "" on AMD GPUs
+                raise RuntimeError(
+                    "AMD cupy does not support cub, custom reduction had to be used."
+                )
+
+            bnnz = cupy_backend.reduction(mask)
+        else:
+            bnnz = cp.sum(mask)
+
+        if bnnz != 0:
+            # Sort the data by block-row and -column.
+            sort_index[offset : offset + bnnz] = cp.nonzero(mask)[0]
+
+            offset += bnnz
+
+    return sort_index

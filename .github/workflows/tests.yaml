@@ -1,0 +1,73 @@
+# Copyright (c) 2024-2026 ETH Zurich and the authors of the quatrex package.
+name: Run Tests and Determine Code Coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-coverage:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      NUMBA_NUM_THREADS: 1
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Pull LFS Files
+        run: git lfs pull
+
+      - name: Set Up Pixi
+        uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          frozen: true
+          activate-environment: ci
+
+      - name: Run MPI Tests - qttools
+        run: |
+          NUMBA_DISABLE_JIT=1 mpiexec -np 3 coverage run --source=src --parallel-mode -m pytest -vv --only-mpi tests/qttools
+
+      - name: Run MPI Tests - quatrex
+        run: |
+          NUMBA_DISABLE_JIT=1 mpiexec -np 3 coverage run --source=src --parallel-mode -m pytest -vv --only-mpi tests/quatrex
+
+      - name: Run Numba Tests - qttools kernels
+        if: success() || failure()
+        run: |
+          coverage run --source=src --parallel-mode -m pytest -n auto -vv tests/qttools/kernels
+
+      - name: Run Tests - qttools
+        if: success() || failure()
+        run: |
+          NUMBA_DISABLE_JIT=1 coverage run --source=src --parallel-mode -m pytest -n auto -vv tests/qttools
+
+      - name: Run Tests - quatrex
+        if: success() || failure()
+        run: |
+          coverage run --source=src --parallel-mode -m pytest -n auto -vv tests/quatrex
+
+      - name: Generate Coverage Report
+        if: success() || failure()
+        run: |
+          coverage combine .; coverage report; coverage xml
+
+      - name: Python Coverage Comment
+        uses: py-cov-action/python-coverage-comment-action@v4.1
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+
