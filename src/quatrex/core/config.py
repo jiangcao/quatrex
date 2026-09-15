@@ -1598,13 +1598,7 @@ class OutputConfig(BaseModel):
 
 
 class DeviceConfig(BaseModel):
-    """Configuration for the simulated device.
-
-    !!! warning
-        The contacts configuration in this table is only used in QTBM
-        calculations, since we allow more than two contacts in QTBM.
-
-    """
+    """Configuration for the simulated device."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1691,13 +1685,7 @@ class DeviceConfig(BaseModel):
     """
 
     contacts: list[ContactConfig] = Field(default_factory=list)
-    """The contacts of the device.
-
-    !!! warning
-        The contacts configuration in this table is only used in QTBM
-        calculations, since we allow more than two contacts in QTBM.
-
-    """
+    """The contacts of the device."""
 
     num_orbitals_per_atom: dict[str, int] = {"X": 1}
     """The number of orbitals per atom type.
