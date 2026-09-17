@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+EXPECTED_MIN_INLINE_PNG_CELLS = 2
+
 
 def test_contact_surface_notebook_contains_inline_figure_outputs() -> None:
     notebook_path = (
@@ -22,4 +24,4 @@ def test_contact_surface_notebook_contains_inline_figure_outputs() -> None:
         )
     ]
 
-    assert len(image_output_cells) >= 2
+    assert len(image_output_cells) >= EXPECTED_MIN_INLINE_PNG_CELLS
